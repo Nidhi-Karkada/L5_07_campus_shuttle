@@ -1,0 +1,27 @@
+# Lab 5 – Issues Found in `shuttle_system.py`
+
+Line numbers refer to the **original** `shuttle_system.py`. "Source" says whether a tool reported the issue or whether it is a manual code-review finding (confirmed by running the original program). The initial Bandit report contains only Low-severity findings (0 High, 0 Medium); the High/Medium rows below are correctness bugs found by manual review, ordered first because they affect results.
+
+| Issue | Type | Line(s) | Description | Fix Approach |
+|---|---|---|---|---|
+| Unhandled `KeyError` at end of `main()` | Bug (manual review; no tool flagged it) | 55, 58 | `remove_route("R3")` deletes R3, then `average_load("R3")` looks it up again. Running the original ends with a `KeyError: 'R3'` traceback, so the program crashes. | `average_load` checks the route exists and raises a clear `KeyError`; `main()` catches `KeyError`/`ValueError` and prints "R3 average unavailable". |
+| Negative passenger count accepted | Bug / missing input validation (manual review) | 12, 49 | `add_trip_log("R2", -6)` is stored. A bus cannot carry -6 passengers; the original R2 trips become `[4, -6]` (also written to `fleet.json`), corrupting averages. | Validate in `add_trip_log`: count must be an `int` (not `bool`) and `>= 0`, else `ValueError`. `main()` logs the rejected trip and continues. |
+| Non-numeric passenger count accepted | Bug / missing input validation (manual review) | 12, 50 | `add_trip_log("R3", "full")` stores a string. `sum()` on it later raises `TypeError`, and the bad value is persisted to `fleet.json`. | Same type/range validation as above, so strings never enter `trips`. |
+| Division by zero for a route with no trips | Bug (manual review) | 19–21 | `average_load` computes `sum(trips) / len(trips)`; a route with no trips gives `ZeroDivisionError`. | Raise a descriptive `ValueError("No trips logged for ...")` when `trips` is empty. |
+| Bare `except:` with `pass` hides errors | Bug / bad practice (Pylint W0702, Flake8 E722, Bandit B110 – Low) | 29–30 | Every error is silently swallowed, including the `TypeError` from the `"full"` trip (R3 was silently skipped). Real bugs become invisible and the bare `except` would even catch `KeyboardInterrupt`. | Catch only the expected `ValueError` (route with no trips) and log a warning instead of `pass`. |
+| Mutable default argument `logs=[]` | Bug (Pylint W0102) | 11 | The same list is reused across every call that omits `logs`, so log lines pile up between unrelated calls. | Default to `None` and create a new list inside the function. |
+| Files opened without `with` / without encoding | Resource handling (Pylint R1732 ×2, W1514 ×2) | 39, 42 | Handles are closed manually (write) or never closed (read at line 42–43); an exception between `open` and `close` leaks the handle or leaves a half-written file. No encoding makes behaviour platform-dependent. | Use `with open(..., encoding="utf-8")` and `json.dump`/`json.load`. Parse the data before replacing `routes`. |
+| `global routes` statement | Design (Pylint W0603) | 38, 43 | Rebinding the global `routes` makes state changes harder to follow. | Update the existing dict in place with `routes.clear()` / `routes.update(loaded)`, which removes the need for `global`. |
+| Program runs on import | Design (manual review; Flake8 E305 is the related style symptom) | 60 | `main()` is called at module level, so importing the module runs the demo and prompts for input. | Wrap in `if __name__ == "__main__":`. |
+| Unvalidated route lookup from user input | Bug (manual review) | 56–57 | Entering an unknown route (e.g. `R9`) raises `KeyError` and crashes. | Strip/upper-case the input and check `choice in routes`; otherwise print "Unknown route". |
+| Unused argument `route_id` | Code quality (Pylint W0613) | 33 | `assignDriver` ignores its argument, so it can "assign" a driver to a route that does not exist. | Verify the route exists before choosing a driver (via the shared `_require_route` helper). |
+| Function name `assignDriver` not snake_case | Style (Pylint C0103) | 33 | Violates PEP 8 naming. | Rename to `assign_driver` and update the call in `main()`. |
+| Missing module and function docstrings | Style (Pylint C0114, C0116 ×6) | 1, 11, 16, 19, 23, 33, 37, 45 | Reduces readability and maintainability. | Add a module docstring and a docstring to every function. |
+| `%` string formatting | Style (Pylint C0209) | 13 | Old-style formatting. | Use an f-string. |
+| Line too long (82 > 79) | Style (Flake8 E501) | 13 | Exceeds PEP 8 line length. | Resolved by the f-string rewrite. |
+| Missing blank lines between definitions | Style (Flake8 E302 ×7, E305) | 11, 16, 19, 23, 33, 37, 45, 60 | PEP 8 requires two blank lines around top-level definitions. | Reformat with two blank lines. |
+| `random` for driver choice | Security finding, low relevance (Bandit B311 – Low, Confidence High) | 35 | `random` is not suitable for cryptography, but here it only picks a driver name; no security decision depends on it. | **Left unresolved on purpose** (see below). |
+
+## Findings left unresolved
+
+- **Bandit B311 (line 35):** reported as Low severity. Randomly choosing a driver is not a security use, so replacing `random` with `secrets`, or adding `# nosec`, would only silence the tool. If your instructor wants *every* tool finding gone for the bonus marks, `secrets.choice(drivers)` is a one-word swap, but that is your decision; it does not fix a real vulnerability.
